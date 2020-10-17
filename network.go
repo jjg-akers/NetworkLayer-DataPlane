@@ -30,6 +30,7 @@ func NewNetworkInterface(maxQ int) *NetworkInterface {
 }
 
 //gets a packet from the queue
+// returns an error if the 'queue' is empty
 func (n *NetworkInterface) get() (string, error) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
