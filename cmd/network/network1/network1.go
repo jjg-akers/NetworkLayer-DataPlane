@@ -161,18 +161,36 @@ func (h *Host) Str() string {
 // dst_addr: destination address for the packet
 // data_S: data being transmitted to the network layer
 func (h *Host) UdtSend(dstAddr int, dataS string) {
-	p := NewNetworkPacket(dstAddr, dataS)
 
-	fmt.Printf("%s: sending packet \"%s\" on the Out interface with mtu = %d\n", h.Str(), p.ToByteS(), h.OutInterfaceL[0].Mtu)
-
-	err := h.OutInterfaceL[0].Put(p.ToByteS(), false) // send packets always enqueued successfully
-	if err != nil {
-		fmt.Println("err from put in UDTsent: ", err)
+	// break packet into small enough size to send on link
+	subData := []string{}
+	if len(dataS) > h.OutInterfaceL[0].Mtu {
+		subData = append(subData, dataS[:(len(dataS)/2)])
+		subData = append(subData, dataS[(len(dataS)/2):])
+	} else {
+		subData = append(subData, dataS)
 	}
+
+	fmt.Println("subdata: ", subData)
+
+	for _, v := range subData {
+		p := NewNetworkPacket(dstAddr, v)
+
+		fmt.Printf("%s: sending packet \"%s\" on the Out interface with mtu = %d\n", h.Str(), p.ToByteS(), h.OutInterfaceL[0].Mtu)
+
+		err := h.OutInterfaceL[0].Put(p.ToByteS(), false) // send packets always enqueued successfully
+		if err != nil {
+			fmt.Println("err from put in UDTsent: ", err)
+		}
+	}
+
 }
 
 //UdtReceive receives packest from the network layer
 func (h *Host) UdtReceive() {
+
+	// need to reasemble packets
+
 	pktS, err := h.InInterfaceL[0].Get()
 	if err == nil {
 		fmt.Printf("%s: received packet \"%s\" on the In interface\n", h.Str(), pktS)
@@ -212,6 +230,9 @@ type Router struct {
 //NewRouter returns a new router with given specs
 // interfaceCount: the number of input and output interfaces
 // maxQueSize: max queue legth (passed to interfacess)
+
+// rounter needs to implement packet segmentation is packet is too big for interface
+
 func NewRouter(name string, interfaceCount int, maxQueSize int) *Router {
 	in := make([]*NetworkInterface, interfaceCount)
 	out := make([]*NetworkInterface, interfaceCount)

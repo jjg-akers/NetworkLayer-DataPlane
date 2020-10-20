@@ -5,7 +5,7 @@ import (
 	"log"
 	"sync"
 
-	"github.com/jjg-akers/NetworkLayer-DataPlane/cmd/network"
+	"github.com/jjg-akers/NetworkLayer-DataPlane/cmd/network/network"
 )
 
 //Creates a link between two objects by looking up and linking node interfaces

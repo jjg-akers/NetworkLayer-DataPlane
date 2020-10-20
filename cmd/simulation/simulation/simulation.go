@@ -5,8 +5,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jjg-akers/NetworkLayer-DataPlane/cmd/link"
-	"github.com/jjg-akers/NetworkLayer-DataPlane/cmd/network"
+	"github.com/jjg-akers/NetworkLayer-DataPlane/cmd/link/link"
+	"github.com/jjg-akers/NetworkLayer-DataPlane/cmd/network/network"
 )
 
 //Settings
