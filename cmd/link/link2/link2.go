@@ -5,7 +5,7 @@ import (
 	"log"
 	"sync"
 
-	network "github.com/jjg-akers/NetworkLayer-DataPlane/cmd/network/network1"
+	network "github.com/jjg-akers/NetworkLayer-DataPlane/cmd/network/network2"
 )
 
 //Creates a link between two objects by looking up and linking node interfaces
@@ -117,7 +117,7 @@ func (ll *LinkLayer) Run(wg *sync.WaitGroup) {
 		for {
 			select {
 			case <-ll.Stop:
-				log.Println("linklayer got close signal")
+				// log.Println("linklayer got close signal")
 				log.Println("LinkLayer 'Run' routine ending")
 				return
 			default:
