@@ -323,10 +323,6 @@ func orderer(toOrder chan *NetworkPacket, next chan struct {
 
 	for p := range toOrder {
 
-		// fmt.Println("got packet in orderer. id: ", p.Header.ID)
-		// fmt.Println("got packet in orderer. offset: ", p.Header.FragOffset)
-		// fmt.Println("got packet in orderer. Mf: ", p.Header.MF)
-
 		toReassemble[p.Header.ID] = append(toReassemble[p.Header.ID], p)
 
 		if p.Header.MF == 0 {
@@ -345,6 +341,31 @@ func orderer(toOrder chan *NetworkPacket, next chan struct {
 			id:     p.Header.ID,
 			offset: p.Header.Length + p.Header.FragOffset,
 		}
+	}
+}
+
+//RouteTable is a custom type to hold Router routing tables
+type RouteTable map[int]map[int]int
+
+//Add single route will add a route to the routing table
+func (r RouteTable) AddSingleRoute(inInterface, destAddr, outInterface int) {
+
+	// check if already in map
+	inner, ok := r[inInterface]
+	if !ok {
+		// add the new map
+		inner = make(map[int]int)
+		r[inInterface] = inner
+	}
+
+	// assign out interface
+	inner[destAddr] = outInterface
+}
+
+//AddRoutes allow multiple routes to be added to a route table
+func (r RouteTable) AddRoutes(routes [][3]int) {
+	for _, v := range routes {
+		r.AddSingleRoute(v[0], v[1], v[2])
 	}
 }
 
@@ -422,13 +443,6 @@ func (h *Host) fragHandler(pChan chan *NetworkPacket) {
 
 		toStore <- p
 	}
-
-	// toReassemble := make(map[int][]*NetworkPacket)
-
-	// nextFragMap := make(map[int]int)
-
-	// onHandMap := make(map[int][]*NetworkPacket)
-
 }
 
 //UdtReceive receives packest from the network layer
@@ -448,10 +462,6 @@ func (h *Host) UdtReceive(fragChan chan *NetworkPacket) {
 		}
 
 		fmt.Printf("%s: received packet \"%s\" on the In interface\n", h.Str(), pktS)
-
-		//convert to to packet
-
-		// pass to reassemby routine
 	}
 
 	// reassembly
@@ -493,6 +503,7 @@ type Router struct {
 	Name          string
 	InInterfaceL  []*NetworkInterface
 	OutInterfaceL []*NetworkInterface
+	RoutingTable  map[int]map[int]int
 }
 
 //NewRouter returns a new router with given specs
@@ -500,7 +511,7 @@ type Router struct {
 // maxQueSize: max queue legth (passed to interfacess)
 
 // rounter needs to implement packet segmentation is packet is too big for interface
-func NewRouter(name string, interfaceCount int, maxQueSize int) *Router {
+func NewRouter(name string, interfaceCount int, maxQueSize int, tbl map[int]map[int]int) *Router {
 	in := make([]*NetworkInterface, interfaceCount)
 	out := make([]*NetworkInterface, interfaceCount)
 	for i := 0; i < interfaceCount; i++ {
@@ -513,6 +524,7 @@ func NewRouter(name string, interfaceCount int, maxQueSize int) *Router {
 		Name:          name,
 		InInterfaceL:  in,
 		OutInterfaceL: out,
+		RoutingTable:  tbl,
 	}
 }
 
@@ -569,15 +581,11 @@ func (rt *Router) fragment(maxLength int, p *NetworkPacket) []*NetworkPacket {
 			Header: fragPacketHeader,
 			DataS:  newData,
 		})
-
-		//time.Sleep(time.Second)
 	}
 
 	//fmt.Printf("returning packet slice. len: %d\n", len(toReturn))
 	return toReturn
 }
-
-// PacketHeaderID(id), PacketHeaderMF(mf), PacketHeaderFragOffset(fo))
 
 //look through the content of incoming interfaces and forward to appropriate outgoing interfaces
 func (rt *Router) forward() {
@@ -597,26 +605,44 @@ func (rt *Router) forward() {
 			// HERE you will need to implement a lookup into the
 			// forwarding table to find the appropriate outgoing interface
 			// for now we assume the outgoing interface is also i
-			fmt.Printf("%s: forwarding packet %s from interface %d to %d with mtu %d\n", rt.Str(), p.Str(), i, i, rt.OutInterfaceL[i].Mtu)
+
+			// if 'in' interface and dst = Host3
+			// map[interfaceNumber]map[dst]outInterfaceNumber
+			// inner map
+			// Determine out interface
+			outInterface := i
+			if m, ok := rt.RoutingTable[i]; ok {
+				if out, ok := m[p.Header.DstAddr]; ok {
+					outInterface = out
+				} else {
+					log.Printf("Invalid route -- could not determine out interface from table. %s: packet '%s' lost on interface %d\n", rt.Str(), p.Str(), outInterface)
+					continue
+				}
+			} else {
+				log.Printf("Invalid route -- could not determine out interface from table. %s: packet '%s' lost on interface %d\n", rt.Str(), p.Str(), outInterface)
+				continue
+			}
+
+			fmt.Printf("%s: forwarding packet %s from interface %d to %d with mtu %d\n", rt.Str(), p.Str(), i, i, rt.OutInterfaceL[outInterface].Mtu)
 
 			//check out going mtu
-			if rt.OutInterfaceL[i].Mtu < p.Header.Length+30 {
+			if rt.OutInterfaceL[outInterface].Mtu < p.Header.Length+30 {
 				// call fragment
-				log.Printf("Packet size: %d too big for Mtu: %d. Fragmenting packet...", p.Header.Length+30, rt.OutInterfaceL[i].Mtu)
-				packetFrags := rt.fragment(rt.OutInterfaceL[i].Mtu, p)
+				log.Printf("Packet size: %d too big for Mtu: %d. Fragmenting packet...", p.Header.Length+30, rt.OutInterfaceL[outInterface].Mtu)
+				packetFrags := rt.fragment(rt.OutInterfaceL[outInterface].Mtu, p)
 
 				for _, frag := range packetFrags {
-					if err = rt.OutInterfaceL[i].Put(frag.ToByteS(), false); err != nil {
+					if err = rt.OutInterfaceL[outInterface].Put(frag.ToByteS(), false); err != nil {
 						//log.Printf("Could not put packet %s in router %s, into outInterface %d. Error: %s", p.str, rt.forward, i, err)
-						log.Printf("%s: packet '%s' lost on interface %d\n", rt.Str(), p.Str(), i)
+						log.Printf("%s: packet '%s' lost on interface %d\n", rt.Str(), p.Str(), outInterface)
 					}
 				}
 				return
 			}
 
-			if err = rt.OutInterfaceL[i].Put(p.ToByteS(), false); err != nil {
+			if err = rt.OutInterfaceL[outInterface].Put(p.ToByteS(), false); err != nil {
 				//log.Printf("Could not put packet %s in router %s, into outInterface %d. Error: %s", p.str, rt.forward, i, err)
-				log.Printf("%s: packet '%s' lost on interface %d\n", rt.Str(), p.Str(), i)
+				log.Printf("%s: packet '%s' lost on interface %d\n", rt.Str(), p.Str(), outInterface)
 			}
 		}
 		//log.Println("no packet to forard in router")
